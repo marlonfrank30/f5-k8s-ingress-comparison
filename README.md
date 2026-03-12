@@ -118,7 +118,7 @@ External Client
 │     BIG-IP Next for Kubernetes Pod      │
 │         (F5 TMM Data Plane)             │
 │                                         │
-│  Gateway API + BNK CRDs:               │
+│  Gateway API + BNK CRDs:                │
 │  CNEInstance / BNKSecPolicy             │
 │  F5BigFwPolicy / F5SPKEgress            │
 │  ┌──────────────────────────────────┐   │
