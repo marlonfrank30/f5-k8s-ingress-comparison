@@ -1,4 +1,4 @@
-# 🌐 F5 Kubernetes Ingress Solutions — Technology Comparison
+# 🌐 F5 Kubernetes Ingress & Egress Solutions — Technology Comparison
 
 [![F5](https://img.shields.io/badge/F5-BIG--IP-red)](https://www.f5.com)
 [![NGINX](https://img.shields.io/badge/NGINX-Ingress-green)](https://nginx.org)
