@@ -1,0 +1,118 @@
+# NIC Sample Manifests
+# F5 NGINX Ingress Controller — Example CRD configurations
+
+---
+# VirtualServer — basic HTTP routing with rate limiting and mTLS
+apiVersion: k8s.nginx.org/v1
+kind: VirtualServer
+metadata:
+  name: my-application
+  namespace: production
+spec:
+  host: myapp.example.com
+  tls:
+    secret: myapp-tls-secret
+    redirect:
+      enable: true
+      code: 301
+  policies:
+  - name: rate-limit-policy
+  - name: mtls-policy
+  upstreams:
+  - name: app-backend
+    service: app-service
+    port: 8080
+    healthCheck:
+      enable: true
+      path: /healthz
+      interval: 10s
+      fails: 3
+      passes: 2
+  - name: app-backend-canary
+    service: app-service-canary
+    port: 8080
+  routes:
+  - path: /api/v1
+    splits:
+    - weight: 90
+      action:
+        pass: app-backend
+    - weight: 10
+      action:
+        pass: app-backend-canary
+  - path: /static
+    action:
+      pass: app-backend
+    errorPages:
+    - codes: [404]
+      return:
+        code: 404
+        body: "Not found"
+
+---
+# TransportServer — TCP/UDP L4 ingress
+apiVersion: k8s.nginx.org/v1
+kind: TransportServer
+metadata:
+  name: tcp-passthrough
+  namespace: production
+spec:
+  listener:
+    name: tcp-listener
+    protocol: TCP
+  host: db.example.com
+  upstreams:
+  - name: db-backend
+    service: postgres-service
+    port: 5432
+    healthCheck:
+      enable: true
+      timeout: 5s
+  action:
+    pass: db-backend
+
+---
+# Policy — rate limiting
+apiVersion: k8s.nginx.org/v1
+kind: Policy
+metadata:
+  name: rate-limit-policy
+  namespace: production
+spec:
+  rateLimit:
+    rate: 100r/s
+    key: ${binary_remote_addr}
+    zoneSize: 10m
+    dryRun: false
+    logLevel: error
+    rejectCode: 429
+
+---
+# Policy — OIDC authentication
+apiVersion: k8s.nginx.org/v1
+kind: Policy
+metadata:
+  name: oidc-policy
+  namespace: production
+spec:
+  oidc:
+    clientID: my-client-id
+    clientSecret: oidc-secret
+    authEndpoint: https://idp.example.com/auth
+    tokenEndpoint: https://idp.example.com/token
+    jwksURI: https://idp.example.com/.well-known/jwks.json
+    scope: openid+profile+email
+    redirectURI: /oauth2/callback
+
+---
+# Policy — mTLS
+apiVersion: k8s.nginx.org/v1
+kind: Policy
+metadata:
+  name: mtls-policy
+  namespace: production
+spec:
+  ingressMTLS:
+    clientCertSecret: client-ca-secret
+    verifyClient: "on"
+    verifyDepth: 2

@@ -1,0 +1,156 @@
+# NGF Sample Manifests
+# F5 NGINX Gateway Fabric — Example Gateway API configurations
+
+---
+# GatewayClass — set by Infrastructure Provider
+apiVersion: gateway.networking.k8s.io/v1
+kind: GatewayClass
+metadata:
+  name: nginx
+spec:
+  controllerName: gateway.nginx.org/nginx-gateway-controller
+
+---
+# Gateway — managed by Cluster Operator
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: prod-gateway
+  namespace: nginx-gateway
+spec:
+  gatewayClassName: nginx
+  listeners:
+  - name: http
+    port: 80
+    protocol: HTTP
+    allowedRoutes:
+      namespaces:
+        from: Selector
+        selector:
+          matchLabels:
+            gateway-access: "true"
+  - name: https
+    port: 443
+    protocol: HTTPS
+    tls:
+      mode: Terminate
+      certificateRefs:
+      - name: wildcard-tls-secret
+        namespace: nginx-gateway
+    allowedRoutes:
+      namespaces:
+        from: Selector
+        selector:
+          matchLabels:
+            gateway-access: "true"
+
+---
+# HTTPRoute — managed by Application Developer
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: my-application
+  namespace: production
+  labels:
+    gateway-access: "true"
+spec:
+  parentRefs:
+  - name: prod-gateway
+    namespace: nginx-gateway
+    sectionName: https
+  hostnames:
+  - myapp.example.com
+  rules:
+  # Canary traffic split
+  - matches:
+    - path:
+        type: PathPrefix
+        value: /api
+    backendRefs:
+    - name: app-service
+      port: 8080
+      weight: 90
+    - name: app-service-canary
+      port: 8080
+      weight: 10
+  # Header-based routing
+  - matches:
+    - path:
+        type: PathPrefix
+        value: /
+    - headers:
+      - name: X-Beta-User
+        value: "true"
+    backendRefs:
+    - name: app-service-beta
+      port: 8080
+  # URL rewrite
+  - matches:
+    - path:
+        type: PathPrefix
+        value: /old-path
+    filters:
+    - type: URLRewrite
+      urlRewrite:
+        path:
+          type: ReplacePrefixMatch
+          replacePrefixMatch: /new-path
+    backendRefs:
+    - name: app-service
+      port: 8080
+
+---
+# GRPCRoute — native gRPC routing
+apiVersion: gateway.networking.k8s.io/v1
+kind: GRPCRoute
+metadata:
+  name: grpc-service
+  namespace: production
+spec:
+  parentRefs:
+  - name: prod-gateway
+    namespace: nginx-gateway
+    sectionName: https
+  rules:
+  - matches:
+    - method:
+        type: Exact
+        service: com.example.UserService
+    backendRefs:
+    - name: user-grpc-service
+      port: 9090
+
+---
+# ReferenceGrant — cross-namespace service access
+apiVersion: gateway.networking.k8s.io/v1beta1
+kind: ReferenceGrant
+metadata:
+  name: allow-production-routes
+  namespace: backend-services
+spec:
+  from:
+  - group: gateway.networking.k8s.io
+    kind: HTTPRoute
+    namespace: production
+  to:
+  - group: ""
+    kind: Service
+
+---
+# BackendTLSPolicy — mTLS to backend
+apiVersion: gateway.networking.k8s.io/v1alpha3
+kind: BackendTLSPolicy
+metadata:
+  name: backend-mtls
+  namespace: production
+spec:
+  targetRefs:
+  - group: ""
+    kind: Service
+    name: app-service
+  validation:
+    caCertificateRefs:
+    - name: backend-ca-cert
+      group: ""
+      kind: Secret
+    hostname: app-service.backend-services.svc.cluster.local

@@ -1,0 +1,157 @@
+# BNK Sample Manifests
+# F5 BIG-IP Next for Kubernetes — Example CRD configurations
+
+---
+# Gateway — BNK GatewayClass and Gateway
+apiVersion: gateway.networking.k8s.io/v1
+kind: GatewayClass
+metadata:
+  name: bigip-next
+spec:
+  controllerName: gateway.f5.com/bigip-next-gateway-controller
+
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: bnk-gateway
+  namespace: bigip-next
+spec:
+  gatewayClassName: bigip-next
+  listeners:
+  - name: http
+    port: 80
+    protocol: HTTP
+  - name: https
+    port: 443
+    protocol: HTTPS
+    tls:
+      certificateRefs:
+      - name: tls-secret
+
+---
+# HTTPRoute — standard L7 routing via BNK TMM
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: app-route
+  namespace: production
+spec:
+  parentRefs:
+  - name: bnk-gateway
+    namespace: bigip-next
+  hostnames:
+  - myapp.example.com
+  rules:
+  - matches:
+    - path:
+        type: PathPrefix
+        value: /api
+    backendRefs:
+    - name: app-service
+      port: 8080
+      weight: 100
+
+---
+# BNKSecPolicy — WAF, rate limiting, authentication
+apiVersion: f5.f5bigip.bnk.io/v1alpha1
+kind: BNKSecPolicy
+metadata:
+  name: app-security
+  namespace: production
+spec:
+  targetRefs:
+  - group: gateway.networking.k8s.io
+    kind: HTTPRoute
+    name: app-route
+  wafPolicy:
+    enable: true
+    mode: blocking
+    owasp:
+      enable: true
+    botDefense:
+      enable: true
+  rateLimitPolicy:
+    requestsPerSecond: 1000
+    burstSize: 200
+  authPolicy:
+    jwt:
+      enable: true
+      jwksUri: https://idp.example.com/.well-known/jwks.json
+      issuer: https://idp.example.com
+  ipFilter:
+    denyList:
+    - 192.168.100.0/24
+    allowList:
+    - 10.0.0.0/8
+
+---
+# F5BigFwPolicy — stateful L3/L4 ACL firewall
+apiVersion: f5.f5bigip.bnk.io/v1alpha1
+kind: F5BigFwPolicy
+metadata:
+  name: ingress-acl
+  namespace: production
+spec:
+  rules:
+  - name: allow-https
+    source:
+      addresses:
+      - 0.0.0.0/0
+    destination:
+      ports:
+      - 443
+    protocol: TCP
+    action: accept
+    logging: true
+  - name: deny-all
+    action: drop
+    logging: true
+
+---
+# GRPCRoute — native gRPC routing through BNK
+apiVersion: gateway.networking.k8s.io/v1
+kind: GRPCRoute
+metadata:
+  name: llm-inference-route
+  namespace: ai-workloads
+spec:
+  parentRefs:
+  - name: bnk-gateway
+    namespace: bigip-next
+  rules:
+  - matches:
+    - method:
+        service: com.example.InferenceService
+    backendRefs:
+    - name: llm-service-a100
+      port: 50051
+      weight: 70
+    - name: llm-service-h100
+      port: 50051
+      weight: 30
+
+---
+# F5SPKEgress — egress SNAT pool
+apiVersion: f5.f5bigip.bnk.io/v1alpha1
+kind: F5SPKEgress
+metadata:
+  name: egress-snat
+  namespace: production
+spec:
+  snatPool: egress-snat-pool
+  selector:
+    matchLabels:
+      app: my-application
+
+---
+apiVersion: f5.f5bigip.bnk.io/v1alpha1
+kind: F5SPKSnatpool
+metadata:
+  name: egress-snat-pool
+  namespace: production
+spec:
+  addresses:
+  - 10.20.30.100
+  - 10.20.30.101
+  - 10.20.30.102
